@@ -1,0 +1,656 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - AFD OpenShock{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-50 p-4">
+    <!-- Header -->
+    <div class="max-w-7xl mx-auto mb-6 bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+        <div class="flex justify-between items-center flex-wrap gap-4">
+            <h1 class="text-2xl font-bold text-gray-900">AFD OpenShock</h1>
+
+            <div class="flex items-center gap-2 flex-wrap">
+                <button id="startBtn" onclick="startScene()" class="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
+                    Start
+                </button>
+                <button id="stopBtn" onclick="stopScene()" class="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium" disabled>
+                    Stop
+                </button>
+
+                <input
+                    type="text"
+                    id="startDelay"
+                    placeholder="1"
+                    title="Delay before scene starts (minutes)"
+                    class="w-16 px-2 py-2 border border-gray-300 rounded-md text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    oninput="saveSceneSettings()"
+                    onblur="saveSceneSettings()"
+                >
+
+                <input
+                    type="text"
+                    id="stopDelay"
+                    placeholder="5"
+                    title="Auto-stop after duration (minutes)"
+                    class="w-16 px-2 py-2 border border-gray-300 rounded-md text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    oninput="saveSceneSettings()"
+                    onblur="saveSceneSettings()"
+                >
+
+                <a href="/settings" class="ml-4 w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center font-medium text-gray-700" title="Settings">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Devices Grid -->
+    <div id="devicesContainer" class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for device in devices %}
+        <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200 relative" data-device-id="{{ device.id }}" data-shocker-id="{{ device.shocker_id }}">
+            <div class="flex items-center gap-2 mb-2">
+                <input
+                    type="checkbox"
+                    class="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                    {% if device.enabled %}checked{% endif %}
+                    onchange="updateDevice({{ device.id }}, 'enabled', this.checked)"
+                    title="Enable device in scene"
+                >
+                <h3 class="flex-1 font-medium text-gray-900">{{ device.nickname }}</h3>
+                <button
+                    onclick="toggleMetadata({{ device.id }})"
+                    class="p-1 hover:bg-gray-100 rounded"
+                    title="Show details"
+                >
+                    <svg class="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="metadata hidden text-xs text-gray-500 mb-3 p-3 bg-gray-50 rounded space-y-1" id="metadata-{{ device.id }}">
+                <div class="flex items-center gap-2">
+                    <span class="font-medium">Device:</span>
+                    <span>{{ device.device_name or 'Unknown' }}</span>
+                    {% if device.is_online %}
+                        <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded">Online</span>
+                    {% else %}
+                        <span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">Offline</span>
+                    {% endif %}
+                    {% if device.is_paused %}
+                        <span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded">Paused</span>
+                    {% endif %}
+                </div>
+                <div>
+                    <span class="font-medium">Shocker:</span> {{ device.shocker_name or 'Unnamed' }}
+                </div>
+                {% if device.last_synced %}
+                <div>
+                    <span class="font-medium">Last Synced:</span> {{ device.last_synced[:19] }}
+                </div>
+                {% endif %}
+                <div class="font-mono text-xs opacity-50">ID: {{ device.shocker_id }}</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-3">
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">Frequency</label>
+                    <input
+                        type="text"
+                        class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="30-60"
+                        value="{% if device.frequency_min %}{{ device.frequency_min }}{% if device.frequency_max and device.frequency_max != device.frequency_min %}-{{ device.frequency_max }}{% endif %}{% endif %}"
+                        onchange="updateDeviceRange({{ device.id }}, 'frequency', this.value)"
+                        title="How often to trigger (seconds). Use 5 or 5-10 for range"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">Intensity{% if device.intensity_increment %} <span class="current-intensity-badge text-xs text-blue-600 font-medium ml-1">({{ device.current_intensity or 0 }}%)</span>{% endif %}</label>
+                    <input
+                        type="text"
+                        class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="30-60 or +10"
+                        value="{% if device.intensity_increment %}+{{ device.intensity_increment }}{% elif device.intensity_min %}{{ device.intensity_min }}{% if device.intensity_max and device.intensity_max != device.intensity_min %}-{{ device.intensity_max }}{% endif %}{% endif %}"
+                        onchange="updateDeviceRange({{ device.id }}, 'intensity', this.value)"
+                        title="Power level 0-100. Use 50 or 30-60 for range, +10 for increment"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">Duration</label>
+                    <input
+                        type="text"
+                        class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="1-2"
+                        value="{% if device.duration_min %}{{ device.duration_min }}{% if device.duration_max and device.duration_max != device.duration_min %}-{{ device.duration_max }}{% endif %}{% endif %}"
+                        onchange="updateDeviceRange({{ device.id }}, 'duration', this.value)"
+                        title="Duration in seconds. Use 1 or 1-2 for range"
+                    >
+                </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-3">
+                <button
+                    onclick="controlDevice({{ device.id }}, 'Sound')"
+                    class="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 border border-gray-300"
+                    title="Sound"
+                >
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                    </svg>
+                </button>
+                <button
+                    onclick="controlDevice({{ device.id }}, 'Vibrate')"
+                    class="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 border border-gray-300"
+                    title="Vibrate"
+                >
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M0 15h2V9H0v6zm3 2h2V7H3v10zm19-8v6h2V9h-2zm-3 8h2V7h-2v10zM16.5 3h-9C6.67 3 6 3.67 6 4.5v15c0 .83.67 1.5 1.5 1.5h9c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5zM16 19H8V5h8v14z"/>
+                    </svg>
+                </button>
+                <button
+                    onclick="controlDevice({{ device.id }}, 'Shock')"
+                    class="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 border border-gray-300"
+                    title="Shock"
+                >
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M7 2v11h3v9l7-12h-4l4-8z"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <input
+                    type="checkbox"
+                    class="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                    {% if device.pre_vibrate_enabled %}checked{% endif %}
+                    onchange="updateDevice({{ device.id }}, 'pre_vibrate_enabled', this.checked)"
+                    title="Enable pre-vibration warning"
+                >
+                <input
+                    type="range"
+                    min="1"
+                    max="5"
+                    value="{{ device.pre_vibrate_duration or 1 }}"
+                    class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    oninput="updateDevice({{ device.id }}, 'pre_vibrate_duration', this.value); this.nextElementSibling.textContent = this.value + 's'"
+                    title="Delay before shock (seconds)"
+                >
+                <span class="text-xs text-gray-500 w-8">{{ device.pre_vibrate_duration or 1 }}s</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Floating Sync Button -->
+    <button
+        id="syncBtn"
+        onclick="syncDevices()"
+        class="fixed bottom-8 right-8 w-14 h-14 bg-white text-gray-700 rounded-full shadow-lg hover:bg-gray-50 flex items-center justify-center border border-gray-300"
+        title="Sync Devices from OpenShock"
+    >
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+        </svg>
+    </button>
+
+    <!-- Status Messages -->
+    <div id="statusMessage" class="fixed bottom-8 left-8 max-w-md hidden"></div>
+
+    <!-- Scene Status Dialog -->
+    <div id="sceneStatusDialog" class="fixed bottom-4 left-1/2 transform -translate-x-1/2 px-6 py-3 bg-gray-900 text-white rounded-lg shadow-xl hidden">
+        <div id="sceneStatusText" class="text-sm font-medium"></div>
+    </div>
+</div>
+
+<script>
+let sceneIntervals = [];
+let sceneTimeout = null;
+let autoStopTimeout = null;
+let sceneStatusInterval = null;
+let sceneStartTime = null;
+let sceneEndTime = null;
+
+function showMessage(message, type = 'info') {
+    const el = document.getElementById('statusMessage');
+    el.textContent = message;
+    el.className = `fixed bottom-8 left-8 max-w-md px-4 py-3 rounded shadow-lg ${
+        type === 'error' ? 'bg-red-50 border border-red-200 text-red-700' :
+        type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' :
+        'bg-blue-50 border border-blue-200 text-blue-700'
+    }`;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+function parseMinutes(str) {
+    if (!str) return 0;
+    // Support both plain numbers (e.g., "1", "5") and "1m" format
+    const withM = str.match(/^(\d+)m$/);
+    if (withM) {
+        return parseInt(withM[1]) * 60 * 1000;
+    }
+    // Try parsing as plain number (minutes)
+    const plainNumber = parseInt(str);
+    return isNaN(plainNumber) ? 0 : plainNumber * 60 * 1000;
+}
+
+function parseRange(str) {
+    if (!str) return null;
+    // Check for increment format: +10, +25, etc.
+    const incrementMatch = str.match(/^\+(\d+)$/);
+    if (incrementMatch) {
+        return { increment: parseInt(incrementMatch[1]) };
+    }
+    const parts = str.split('-').map(s => s.trim());
+    if (parts.length === 1) {
+        const val = parseFloat(parts[0]);
+        return isNaN(val) ? null : { min: val, max: val };
+    }
+    const min = parseFloat(parts[0]);
+    const max = parseFloat(parts[1]);
+    return (isNaN(min) || isNaN(max)) ? null : { min, max };
+}
+
+function randomInRange(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function formatTime(ms) {
+    const totalSeconds = Math.ceil(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
+}
+
+function showSceneStatus(text) {
+    const dialog = document.getElementById('sceneStatusDialog');
+    const textEl = document.getElementById('sceneStatusText');
+    textEl.textContent = text;
+    dialog.classList.remove('hidden');
+}
+
+function hideSceneStatus() {
+    const dialog = document.getElementById('sceneStatusDialog');
+    dialog.classList.add('hidden');
+    if (sceneStatusInterval) {
+        clearInterval(sceneStatusInterval);
+        sceneStatusInterval = null;
+    }
+}
+
+async function triggerDevice(deviceEl, controlType = 'Shock') {
+    const deviceId = deviceEl.dataset.deviceId;
+    const deviceName = deviceEl.querySelector('h3').textContent;
+    const inputs = {
+        intensity: deviceEl.querySelectorAll('input[type="text"]')[1].value,
+        duration: deviceEl.querySelectorAll('input[type="text"]')[2].value
+    };
+
+    const intensity = parseRange(inputs.intensity);
+    const duration = parseRange(inputs.duration);
+
+    if (!intensity || !duration) return;
+
+    let intensityVal;
+    let useIncrement = false;
+
+    if (intensity.increment !== undefined) {
+        // Increment mode - backend will handle the value
+        intensityVal = 0; // Placeholder, backend will use current_intensity
+        useIncrement = true;
+    } else {
+        intensityVal = randomInRange(intensity.min, intensity.max);
+    }
+
+    const durationVal = randomInRange(duration.min, duration.max) * 1000; // convert to ms
+    const durationSec = (durationVal / 1000).toFixed(1);
+
+    // Check if pre-vibrate is enabled
+    const preVibrateCheckbox = deviceEl.querySelector('input[type="checkbox"][title*="pre-vibration"]');
+
+    if (controlType === 'Shock' && preVibrateCheckbox && preVibrateCheckbox.checked) {
+        const preVibrateSlider = deviceEl.querySelector('input[type="range"]');
+        const delaySeconds = parseInt(preVibrateSlider.value);
+        const vibrateFixedDuration = 500; // Fixed 0.5 seconds vibration
+
+        // Send 0.5s vibrate first with same intensity as shock (don't increment yet)
+        await fetch(`/device/control/${deviceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ intensity: intensityVal, duration: vibrateFixedDuration, control_type: 'Vibrate', use_increment: useIncrement, increment_after: false })
+        });
+        // Wait for the delay period (slider value in seconds)
+        await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+    }
+
+    try {
+        const response = await fetch(`/device/control/${deviceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ intensity: intensityVal, duration: durationVal, control_type: controlType, use_increment: useIncrement })
+        });
+        const data = await response.json();
+        if (data.success) {
+            const displayIntensity = data.current_intensity !== null ? data.current_intensity : intensityVal;
+            showMessage(`${deviceName}: ${controlType} ${displayIntensity}% for ${durationSec}s`, 'success');
+
+            // Update UI to show current intensity if in increment mode
+            if (useIncrement && data.current_intensity !== null) {
+                updateCurrentIntensityDisplay(deviceEl, data.current_intensity);
+            }
+        } else {
+            showMessage(`${deviceName}: ${data.message}`, 'error');
+        }
+    } catch (e) {
+        showMessage(`${deviceName}: Network error`, 'error');
+    }
+}
+
+async function startScene() {
+    const startDelayValue = document.getElementById('startDelay').value;
+    const stopDelayValue = document.getElementById('stopDelay').value;
+    const startDelay = parseMinutes(startDelayValue);
+    const stopDelay = parseMinutes(stopDelayValue);
+
+    // Reset intensity for all increment devices
+    await fetch('/devices/reset-intensity', { method: 'POST' });
+
+    // Clear all intensity badges
+    document.querySelectorAll('.current-intensity-badge').forEach(badge => {
+        badge.textContent = '(0%)';
+    });
+
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+
+    // Show pre-scene countdown
+    if (startDelay > 0) {
+        const preSceneStart = Date.now();
+        const preSceneEnd = preSceneStart + startDelay;
+
+        showSceneStatus(`Waiting ${formatTime(startDelay)} before starting scene`);
+
+        sceneStatusInterval = setInterval(() => {
+            const remaining = preSceneEnd - Date.now();
+            if (remaining <= 0) {
+                clearInterval(sceneStatusInterval);
+            } else {
+                showSceneStatus(`Waiting ${formatTime(remaining)} before starting scene`);
+            }
+        }, 1000);
+    }
+
+    sceneTimeout = setTimeout(() => {
+        // Clear pre-scene countdown interval if it exists
+        if (sceneStatusInterval) {
+            clearInterval(sceneStatusInterval);
+            sceneStatusInterval = null;
+        }
+
+        // Start the actual scene
+        sceneStartTime = Date.now();
+        if (stopDelay > 0) {
+            sceneEndTime = sceneStartTime + stopDelay;
+            showSceneStatus(`Scene running: ${formatTime(stopDelay)} remaining`);
+
+            // Update countdown every second
+            sceneStatusInterval = setInterval(() => {
+                const remaining = sceneEndTime - Date.now();
+                if (remaining <= 0) {
+                    showSceneStatus('Scene running');
+                } else {
+                    showSceneStatus(`Scene running: ${formatTime(remaining)} remaining`);
+                }
+            }, 1000);
+        } else {
+            // No auto-stop, just show "Scene running"
+            showSceneStatus('Scene running');
+        }
+
+        const enabledDevices = Array.from(document.querySelectorAll('[data-device-id]'))
+            .filter(el => el.querySelector('input[type="checkbox"]').checked);
+
+        enabledDevices.forEach(deviceEl => {
+            const freqInput = deviceEl.querySelectorAll('input[type="text"]')[0].value;
+            const freq = parseRange(freqInput);
+
+            if (!freq) return;
+
+            const triggerWithRandomFreq = () => {
+                triggerDevice(deviceEl);
+                const nextInterval = randomInRange(freq.min, freq.max) * 1000;
+                const timeout = setTimeout(triggerWithRandomFreq, nextInterval);
+                sceneIntervals.push(timeout);
+            };
+
+            triggerWithRandomFreq();
+        });
+
+        if (stopDelay > 0) {
+            autoStopTimeout = setTimeout(async () => {
+                await stopScene();
+                showMessage('Scene auto-stopped', 'info');
+            }, stopDelay);
+        }
+    }, startDelay);
+}
+
+async function stopScene() {
+    clearTimeout(sceneTimeout);
+    clearTimeout(autoStopTimeout);
+    sceneIntervals.forEach(clearTimeout);
+    sceneIntervals = [];
+
+    hideSceneStatus();
+    sceneStartTime = null;
+    sceneEndTime = null;
+
+    // Reset intensity for all increment devices
+    await fetch('/devices/reset-intensity', { method: 'POST' });
+
+    // Clear all intensity badges
+    document.querySelectorAll('.current-intensity-badge').forEach(badge => {
+        badge.textContent = '(0%)';
+    });
+
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    showMessage('Scene stopped', 'info');
+}
+
+async function controlDevice(deviceId, controlType) {
+    const deviceEl = document.querySelector(`[data-device-id="${deviceId}"]`);
+    const deviceName = deviceEl.querySelector('h3').textContent;
+    const inputs = {
+        intensity: deviceEl.querySelectorAll('input[type="text"]')[1].value,
+        duration: deviceEl.querySelectorAll('input[type="text"]')[2].value
+    };
+
+    const intensity = parseRange(inputs.intensity);
+    const duration = parseRange(inputs.duration);
+
+    if (!intensity || !duration) {
+        showMessage('Invalid intensity or duration', 'error');
+        return;
+    }
+
+    let intensityVal;
+    let useIncrement = false;
+
+    if (intensity.increment !== undefined) {
+        // Increment mode - backend will handle the value
+        intensityVal = 0; // Placeholder, backend will use current_intensity
+        useIncrement = true;
+    } else {
+        intensityVal = randomInRange(intensity.min, intensity.max);
+    }
+
+    const durationVal = randomInRange(duration.min, duration.max) * 1000;
+    const durationSec = (durationVal / 1000).toFixed(1);
+
+    // Check if pre-vibrate is enabled for shock
+    const preVibrateCheckbox = deviceEl.querySelector('input[type="checkbox"][title*="pre-vibration"]');
+
+    if (controlType === 'Shock' && preVibrateCheckbox && preVibrateCheckbox.checked) {
+        const preVibrateSlider = deviceEl.querySelector('input[type="range"]');
+        const delaySeconds = parseInt(preVibrateSlider.value);
+        const vibrateFixedDuration = 500; // Fixed 0.5 seconds vibration
+
+        // Send 0.5s vibrate first with same intensity as shock (don't increment yet)
+        try {
+            const displayIntensity = useIncrement ? 'current' : intensityVal;
+            showMessage(`${deviceName}: Pre-vibrate ${displayIntensity}%, waiting ${delaySeconds}s...`, 'info');
+            await fetch(`/device/control/${deviceId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ intensity: intensityVal, duration: vibrateFixedDuration, control_type: 'Vibrate', use_increment: useIncrement, increment_after: false })
+            });
+            // Wait for the delay period (slider value in seconds)
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+        } catch (e) {
+            showMessage('Pre-vibration failed', 'error');
+        }
+    }
+
+    try {
+        const response = await fetch(`/device/control/${deviceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ intensity: intensityVal, duration: durationVal, control_type: controlType, use_increment: useIncrement })
+        });
+        const data = await response.json();
+        if (data.success) {
+            const displayIntensity = data.current_intensity !== null ? data.current_intensity : intensityVal;
+            showMessage(`${deviceName}: ${controlType} ${displayIntensity}% for ${durationSec}s`, 'success');
+
+            // Update UI to show current intensity if in increment mode
+            if (useIncrement && data.current_intensity !== null) {
+                updateCurrentIntensityDisplay(deviceEl, data.current_intensity);
+            }
+        } else {
+            showMessage(data.message, 'error');
+        }
+    } catch (e) {
+        showMessage('Network error', 'error');
+    }
+}
+
+async function updateDevice(deviceId, field, value) {
+    try {
+        await fetch(`/device/update/${deviceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [field]: value })
+        });
+    } catch (e) {
+        showMessage('Failed to update device', 'error');
+    }
+}
+
+async function updateDeviceRange(deviceId, field, value) {
+    const range = parseRange(value);
+    if (!range) return;
+
+    const data = {};
+    if (range.increment !== undefined) {
+        // Increment mode (e.g., "+10")
+        data[`${field}_increment`] = range.increment;
+        data[`${field}_min`] = null;
+        data[`${field}_max`] = null;
+    } else {
+        // Regular range mode
+        data[`${field}_min`] = range.min;
+        data[`${field}_max`] = range.max;
+        data[`${field}_increment`] = null;
+    }
+
+    try {
+        await fetch(`/device/update/${deviceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+    } catch (e) {
+        showMessage('Failed to update device', 'error');
+    }
+}
+
+
+async function syncDevices() {
+    const syncBtn = document.getElementById('syncBtn');
+    const syncIcon = syncBtn.querySelector('svg');
+    syncBtn.disabled = true;
+    syncIcon.classList.add('animate-spin');
+
+    try {
+        const response = await fetch('/devices/sync', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.success) {
+            showMessage(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showMessage(data.message, 'error');
+            syncBtn.disabled = false;
+            syncIcon.classList.remove('animate-spin');
+        }
+    } catch (e) {
+        showMessage('Network error during sync', 'error');
+        syncBtn.disabled = false;
+        syncIcon.classList.remove('animate-spin');
+    }
+}
+
+function toggleMetadata(deviceId) {
+    const metadata = document.getElementById(`metadata-${deviceId}`);
+    metadata.classList.toggle('hidden');
+}
+
+function updateCurrentIntensityDisplay(deviceEl, currentIntensity) {
+    const deviceId = deviceEl.dataset.deviceId;
+    let badge = deviceEl.querySelector('.current-intensity-badge');
+
+    if (!badge) {
+        const intensityContainer = deviceEl.querySelectorAll('div.grid > div')[1];
+        badge = document.createElement('span');
+        badge.className = 'current-intensity-badge text-xs text-blue-600 font-medium ml-1';
+        intensityContainer.querySelector('label').appendChild(badge);
+    }
+
+    badge.textContent = `(${currentIntensity}%)`;
+}
+
+function saveSceneSettings() {
+    const startDelay = document.getElementById('startDelay').value;
+    const stopDelay = document.getElementById('stopDelay').value;
+    localStorage.setItem('sceneStartDelay', startDelay);
+    localStorage.setItem('sceneStopDelay', stopDelay);
+}
+
+function loadSceneSettings() {
+    const startDelay = localStorage.getItem('sceneStartDelay');
+    const stopDelay = localStorage.getItem('sceneStopDelay');
+    if (startDelay) {
+        document.getElementById('startDelay').value = startDelay;
+    }
+    if (stopDelay) {
+        document.getElementById('stopDelay').value = stopDelay;
+    }
+}
+
+// Load settings on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadSceneSettings);
+} else {
+    // DOM already loaded, call immediately
+    loadSceneSettings();
+}
+</script>
+{% endblock %}
